@@ -1,49 +1,79 @@
-// 📦 Sublimados F&B Manager - Backend
-const express = require("express");
-const mongoose = require("mongoose");
-const cors = require("cors");
+// server.js - Express + Mongoose backend
+require('dotenv').config();
+const express = require('express');
+const mongoose = require('mongoose');
+const cors = require('cors');
+
 const app = express();
-
 app.use(express.json());
-app.use(cors());
+app.use(cors({ origin: true, credentials: true }));
 
-// 🔗 Conexión a MongoDB (Render usará tu variable MONGO_URI)
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("✅ Conectado a MongoDB"))
-  .catch(err => console.log("❌ Error de conexión:", err));
+const PORT = process.env.PORT || 4000;
+const MONGO = process.env.MONGODB_URI || 'mongodb://localhost:27017/el_emprendedor';
 
-// 📋 Modelo de Pedido
-const Pedido = mongoose.model("Pedido", new mongoose.Schema({
-  cliente: String,
-  total: Number,
-  sena: Number,
-  resto: Number
-}));
+// Models
+const Producto = require('./models/Producto');
+const Pedido = require('./models/Pedido');
 
-// 🏠 Ruta principal
-app.get("/", (req, res) => res.send("Servidor funcionando correctamente ✅"));
+mongoose.connect(MONGO, { useNewUrlParser:true, useUnifiedTopology:true })
+  .then(()=> console.log('MongoDB connected'))
+  .catch(err=> console.error('MongoDB error', err));
 
-// ➕ Guardar pedido
-app.post("/api/pedidos", async (req, res) => {
-  try {
-    const pedido = new Pedido(req.body);
-    await pedido.save();
-    res.json({ mensaje: "Pedido guardado correctamente", pedido });
-  } catch (error) {
-    res.status(500).json({ error: "Error al guardar el pedido" });
+// --- Auth (simple)
+/*
+  For production use JWT and strong password hashing.
+  This simple route checks ADMIN_USER/ADMIN_PASS from .env
+*/
+app.post('/api/login', (req,res)=>{
+  const { user, pass } = req.body;
+  if(user === process.env.ADMIN_USER && pass === process.env.ADMIN_PASS){
+    return res.json({ ok:true });
   }
+  res.status(401).json({ ok:false, message:'Credenciales invalidas' });
 });
 
-// 📄 Listar pedidos
-app.get("/api/pedidos", async (req, res) => {
-  try {
-    const pedidos = await Pedido.find();
-    res.json(pedidos);
-  } catch (error) {
-    res.status(500).json({ error: "Error al obtener los pedidos" });
-  }
+// --- Productos
+app.get('/api/productos', async (req,res)=>{
+  const prods = await Producto.find().sort({ nombre:1 });
+  res.json(prods);
 });
 
-// 🚀 Iniciar servidor
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`🌐 Servidor activo en puerto ${PORT}`));
+app.post('/api/productos', async (req,res)=>{
+  const { nombre, precio, descripcion } = req.body;
+  const p = new Producto({ nombre, precio, descripcion, vendidos:0 });
+  await p.save();
+  res.json(p);
+});
+
+app.delete('/api/productos/:id', async (req,res)=>{
+  await Producto.findByIdAndDelete(req.params.id);
+  res.json({ ok:true });
+});
+
+// --- Pedidos
+app.get('/api/pedidos', async (req,res)=>{
+  const pedidos = await Pedido.find().sort({ createdAt:-1 });
+  res.json(pedidos);
+});
+
+app.post('/api/pedidos', async (req,res)=>{
+  const { cliente, total, senia } = req.body;
+  const restante = (Number(total) || 0) - (Number(senia) || 0);
+  const pedido = new Pedido({ cliente, total, senia, restante, estado:'Pendiente', urgente:false });
+  await pedido.save();
+  res.json(pedido);
+});
+
+app.delete('/api/pedidos/:id', async (req,res)=>{
+  await Pedido.findByIdAndDelete(req.params.id);
+  res.json({ ok:true });
+});
+
+// --- Top 3 (basic)
+app.get('/api/top3', async (req,res)=>{
+  // aggregate by vendidos  
+  const top = await Producto.find().sort({ vendidos:-1 }).limit(3);
+  res.json(top);
+});
+
+app.listen(PORT, ()=> console.log('Server running on', PORT));
